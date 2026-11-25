@@ -11,3 +11,4 @@ espeakng-loader>=0.2.4
 phonemizer-fork>=3.3.2
 spacy>=3.8
 num2words>=0.5
+gunicorn
