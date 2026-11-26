@@ -1,174 +1,177 @@
 import os
-import uuid
-import subprocess
+import sys
 import tempfile
+import threading
 
 from flask import Flask, request, send_file, render_template_string
-from run import Mithi
+from huggingface_hub import snapshot_download
 
 app = Flask(__name__)
-
 app.config["MAX_CONTENT_LENGTH"] = 5 * 1024 * 1024
 
-print("Loading Mithi AI model...")
+MODEL_DIR = os.path.join(os.getcwd(), "mithi-v2-flash")
 
-import torch
-torch.set_num_threads(2)
+tts = None
+model_lock = threading.Lock()
 
-tts = Mithi(device="cpu")
-
-print("Mithi AI model loaded successfully!")
-
-VOICES = {
-    "satvik": "Satvik (Male)",
-    "anirban": "Anirban (Male)",
-    "nakul": "Nakul (Male)",
-    "vasant": "Vasant (Male)",
-    "siddhant": "Siddhant (Male)",
-    "charvi": "Charvi (Female)",
-    "ahana": "Ahana (Female)",
-    "vaidehi": "Vaidehi (Female)",
-    "malini": "Malini (Female)",
-    "jahnavi": "Jahnavi (Female)"
-}
+VOICES = [
+    "satvik", "anirban", "nakul", "vasant", "siddhant",
+    "charvi", "ahana", "vaidehi", "malini", "jahnavi"
+]
 
 HTML = """
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Mithi Hindi AI Voice Generator</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Mithi Hindi TTS</title>
     <style>
         body {
-            background: #f1f3f6;
             font-family: Arial;
+            background: #f1f3f6;
             padding: 20px;
         }
-
         .box {
-            background: white;
             max-width: 600px;
             margin: auto;
+            background: white;
             padding: 20px;
             border-radius: 12px;
         }
-
-        textarea, select {
+        textarea, select, button {
             width: 100%;
-            padding: 12px;
-            margin: 10px 0;
+            padding: 13px;
+            margin-top: 12px;
             box-sizing: border-box;
             font-size: 16px;
         }
-
-        textarea {
-            height: 250px;
-        }
-
         button {
-            background: #087b46;
+            background: #1769ff;
             color: white;
-            padding: 15px;
             border: none;
-            width: 100%;
-            font-size: 17px;
-            border-radius: 8px;
-        }
-
-        h2 {
-            text-align: center;
+            border-radius: 7px;
         }
     </style>
 </head>
-
 <body>
 <div class="box">
+    <h2>Mithi Hindi AI Voice Generator</h2>
+    <form method="POST" action="/generate">
+        <textarea name="text" rows="9"
+        placeholder="अपनी कहानी यहाँ लिखें..." required></textarea>
 
-<h2>🎙️ Mithi Hindi AI Voice Generator</h2>
+        <select name="voice">
+            <option value="satvik">Satvik - Male</option>
+            <option value="anirban">Anirban - Male</option>
+            <option value="nakul">Nakul - Male</option>
+            <option value="vasant">Vasant - Male</option>
+            <option value="siddhant">Siddhant - Male</option>
+            <option value="charvi">Charvi - Female</option>
+            <option value="ahana">Ahana - Female</option>
+            <option value="vaidehi">Vaidehi - Female</option>
+            <option value="malini">Malini - Female</option>
+            <option value="jahnavi">Jahnavi - Female</option>
+        </select>
 
-<form action="/generate" method="POST">
-
-<label>अपनी कहानी यहाँ Paste करें:</label>
-
-<textarea name="text" maxlength="20000"
-placeholder="अपनी कहानी यहाँ लिखें..." required></textarea>
-
-<label>अपनी पसंद की आवाज चुनें:</label>
-
-<select name="voice">
-{% for key, name in voices.items() %}
-<option value="{{ key }}">{{ name }}</option>
-{% endfor %}
-</select>
-
-<button type="submit">Generate Audio</button>
-
-</form>
-
+        <button type="submit">Generate Audio</button>
+    </form>
 </div>
 </body>
 </html>
 """
 
 
+def load_model():
+    global tts
+
+    if tts is not None:
+        return tts
+
+    with model_lock:
+        if tts is not None:
+            return tts
+
+        print("Downloading Mithi model files...")
+
+        snapshot_download(
+            repo_id="Oomni/mithi-v2-flash",
+            local_dir=MODEL_DIR
+        )
+
+        os.chdir(MODEL_DIR)
+        sys.path.insert(0, MODEL_DIR)
+
+        import torch
+        torch.set_num_threads(1)
+
+        from run import Mithi
+
+        print("Loading Mithi model...")
+        tts = Mithi(device="cpu")
+
+        print("Mithi model loaded successfully!")
+
+    return tts
+
+
 @app.route("/")
 def home():
-    return render_template_string(HTML, voices=VOICES)
+    return render_template_string(HTML)
 
 
 @app.route("/generate", methods=["POST"])
 def generate():
-
     text = request.form.get("text", "").strip()
     voice = request.form.get("voice", "satvik")
 
     if not text:
-        return "कृपया कहानी लिखें।", 400
-
-    if len(text) > 20000:
-        return "अधिकतम 20000 characters की अनुमति है।", 400
+        return "Please enter some text.", 400
 
     if voice not in VOICES:
-        return "Invalid voice selection.", 400
+        return "Invalid voice selected.", 400
 
-    with tempfile.TemporaryDirectory() as folder:
+    output_path = None
 
-        wav_file = os.path.join(folder, "story.wav")
-        mp3_file = os.path.join(folder, "story.mp3")
+    try:
+        model = load_model()
 
-        try:
-            audio = tts.synthesize(
-                text,
-                lang="hi",
-                voice=voice
-            )
+        audio = model.synthesize(
+            text,
+            lang="hi",
+            voice=voice
+        )
 
-            tts.save(audio, wav_file)
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix=".wav",
+            delete=False
+        )
+        output_path = temp_file.name
+        temp_file.close()
 
-            subprocess.run(
-                [
-                    "ffmpeg",
-                    "-y",
-                    "-i", wav_file,
-                    "-codec:a", "libmp3lame",
-                    "-b:a", "128k",
-                    mp3_file
-                ],
-                check=True,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE
-            )
+        model.save(audio, output_path)
 
-            return send_file(
-                mp3_file,
-                as_attachment=True,
-                download_name="Mithi_Hindi_Audio.mp3",
-                mimetype="audio/mpeg"
-            )
+        response = send_file(
+            output_path,
+            mimetype="audio/wav",
+            as_attachment=True,
+            download_name="mithi_audio.wav"
+        )
 
-        except Exception as e:
-            return f"Audio generation failed: {str(e)}", 500
+        response.call_on_close(
+            lambda: os.remove(output_path)
+            if os.path.exists(output_path) else None
+        )
+
+        return response
+
+    except Exception as e:
+        print("ERROR:", repr(e))
+
+        if output_path and os.path.exists(output_path):
+            os.remove(output_path)
+
+        return "Audio generation failed: " + str(e), 500
 
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    app.run(host="0.0.0.0", port=10000)
