@@ -13,11 +13,7 @@ MODEL_DIR = os.path.join(os.getcwd(), "mithi-v2-flash")
 
 tts = None
 model_lock = threading.Lock()
-
-VOICES = [
-    "satvik", "anirban", "nakul", "vasant", "siddhant",
-    "charvi", "ahana", "vaidehi", "malini", "jahnavi"
-]
+VOICES = ["satvik", "vaidehi"]
 
 HTML = """
 <!DOCTYPE html>
@@ -60,18 +56,10 @@ HTML = """
         <textarea name="text" rows="9"
         placeholder="अपनी कहानी यहाँ लिखें..." required></textarea>
 
-        <select name="voice">
-            <option value="satvik">Satvik - Male</option>
-            <option value="anirban">Anirban - Male</option>
-            <option value="nakul">Nakul - Male</option>
-            <option value="vasant">Vasant - Male</option>
-            <option value="siddhant">Siddhant - Male</option>
-            <option value="charvi">Charvi - Female</option>
-            <option value="ahana">Ahana - Female</option>
-            <option value="vaidehi">Vaidehi - Female</option>
-            <option value="malini">Malini - Female</option>
-            <option value="jahnavi">Jahnavi - Female</option>
-        </select>
+<select name="voice">
+    <option value="satvik">Male - Satvik</option>
+    <option value="vaidehi">Female - Vaidehi</option>
+</select>
 
         <button type="submit">Generate Audio</button>
     </form>
